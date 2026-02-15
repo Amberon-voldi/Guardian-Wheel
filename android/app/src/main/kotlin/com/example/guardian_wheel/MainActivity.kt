@@ -1,4 +1,4 @@
-package com.example.guardian_wheel
+package com.mythics.guardian_wheel
 
 import io.flutter.embedding.android.FlutterActivity
 

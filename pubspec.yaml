@@ -31,9 +31,36 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  connectivity_plus: ^7.0.0
+  appwrite: ^13.0.0
+
+  # Sensors & location
+  sensors_plus: ^6.1.1
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+
+  # Google Maps
+  google_maps_flutter: ^2.10.0
+
+  # BLE / P2P mesh
+  flutter_blue_plus: ^1.35.2
+
+  # Local DB for offline-first
+  sqflite: ^2.4.1
+  path: ^1.9.1
+  path_provider: ^2.1.5
+
+  # Env config
+  flutter_dotenv: ^5.2.1
+
+  # Utils
+  uuid: ^4.5.1
+
+  # Background service
+  flutter_background_service: ^5.1.0
+  flutter_local_notifications: ^18.0.1
+  url_launcher: ^6.1.13
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +72,13 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.1
+
+dependency_overrides:
+  flutter_web_auth_2: ^5.0.1
+  flutter_web_auth_2_platform_interface: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -58,9 +92,9 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/logo.png
+    - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -87,3 +121,20 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  # You can customize individual icon sizes/platforms here later if needed.
+
+flutter_native_splash:
+  color: "#ffffff" # white background for splash
+  image: "assets/logo.png"
+  android: true
+  ios: true
+  android_12:
+    color: "#ffffff" # match main splash background (white)
+    image: "assets/logo.png"
