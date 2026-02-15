@@ -8,15 +8,33 @@ import '../service/safety_service.dart';
 
 enum RideNavigationEventType { openAlert }
 
+enum RideCrashCountdownEventType { started, tick, cancelled }
+
 class RideNavigationEvent {
   const RideNavigationEvent({
     required this.type,
     required this.reason,
     required this.timestamp,
+    this.countdownSeconds,
+    this.isCrashCountdown = false,
   });
 
   final RideNavigationEventType type;
   final String reason;
+  final DateTime timestamp;
+  final int? countdownSeconds;
+  final bool isCrashCountdown;
+}
+
+class RideCrashCountdownEvent {
+  const RideCrashCountdownEvent({
+    required this.type,
+    required this.secondsRemaining,
+    required this.timestamp,
+  });
+
+  final RideCrashCountdownEventType type;
+  final int secondsRemaining;
   final DateTime timestamp;
 }
 
@@ -44,9 +62,15 @@ class RideController {
       StreamController<LocationPoint>.broadcast();
   final StreamController<RideNavigationEvent> _navigationController =
       StreamController<RideNavigationEvent>.broadcast();
+  final StreamController<RideCrashCountdownEvent> _crashCountdownController =
+      StreamController<RideCrashCountdownEvent>.broadcast();
 
   StreamSubscription<LocationPoint>? _locationSub;
   StreamSubscription<CrashEvent>? _crashSub;
+  Timer? _crashCountdownTimer;
+  CrashEvent? _pendingCrashEvent;
+  int _crashSecondsRemaining = 0;
+  static const int _crashCountdownSeconds = 10;
 
   String? _rideId;
   RideStatus _status = RideStatus.completed;
@@ -59,7 +83,10 @@ class RideController {
 
   Stream<RideStatus> get statusStream => _statusController.stream;
   Stream<LocationPoint> get locationStream => _locationController.stream;
-  Stream<RideNavigationEvent> get navigationEvents => _navigationController.stream;
+  Stream<RideNavigationEvent> get navigationEvents =>
+      _navigationController.stream;
+  Stream<RideCrashCountdownEvent> get crashCountdownEvents =>
+      _crashCountdownController.stream;
 
   Future<void> startRide() async {
     final location = await _locationService.getCurrentLocation();
@@ -103,7 +130,25 @@ class RideController {
   }
 
   Future<void> triggerManualSos() async {
+    cancelPendingCrashSos();
     await _activateEmergency(reason: 'manual_sos');
+  }
+
+  Future<void> triggerCrashSos() async {
+    await _activateEmergency(reason: 'crash_detected');
+  }
+
+  void cancelPendingCrashSos() {
+    _crashCountdownTimer?.cancel();
+    _crashCountdownTimer = null;
+    _pendingCrashEvent = null;
+    if (_crashSecondsRemaining > 0) {
+      _crashSecondsRemaining = 0;
+      _emitCrashCountdown(
+        type: RideCrashCountdownEventType.cancelled,
+        secondsRemaining: 0,
+      );
+    }
   }
 
   Future<void> _activateEmergency({required String reason}) async {
@@ -111,7 +156,8 @@ class RideController {
       await startRide();
     }
 
-    final location = _latestLocation ?? await _locationService.getCurrentLocation();
+    final location =
+        _latestLocation ?? await _locationService.getCurrentLocation();
     _latestLocation = location;
 
     _setStatus(RideStatus.emergency);
@@ -163,7 +209,42 @@ class RideController {
 
     _crashSub ??= _locationService.crashStream.listen((event) {
       _latestLocation = event.location;
-      _activateEmergency(reason: 'crash_detected');
+      _startCrashSosCountdown(event);
+    });
+  }
+
+  void _startCrashSosCountdown(CrashEvent crashEvent) {
+    if (_crashCountdownTimer != null) {
+      return;
+    }
+
+    _pendingCrashEvent = crashEvent;
+    _crashSecondsRemaining = _crashCountdownSeconds;
+    _emitCrashCountdown(
+      type: RideCrashCountdownEventType.started,
+      secondsRemaining: _crashSecondsRemaining,
+    );
+
+    _crashCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _crashSecondsRemaining -= 1;
+
+      if (_crashSecondsRemaining <= 0) {
+        timer.cancel();
+        _crashCountdownTimer = null;
+        final pending = _pendingCrashEvent;
+        _pendingCrashEvent = null;
+
+        if (pending != null) {
+          _latestLocation = pending.location;
+        }
+        unawaited(triggerCrashSos());
+        return;
+      }
+
+      _emitCrashCountdown(
+        type: RideCrashCountdownEventType.tick,
+        secondsRemaining: _crashSecondsRemaining,
+      );
     });
   }
 
@@ -192,8 +273,25 @@ class RideController {
     );
   }
 
+  void _emitCrashCountdown({
+    required RideCrashCountdownEventType type,
+    required int secondsRemaining,
+  }) {
+    if (_crashCountdownController.isClosed) {
+      return;
+    }
+    _crashCountdownController.add(
+      RideCrashCountdownEvent(
+        type: type,
+        secondsRemaining: secondsRemaining,
+        timestamp: DateTime.now().toUtc(),
+      ),
+    );
+  }
+
   Future<void> dispose() async {
     _locationService.stopTracking();
+    cancelPendingCrashSos();
     await _detachStreams();
     if (!_statusController.isClosed) {
       await _statusController.close();
@@ -203,6 +301,9 @@ class RideController {
     }
     if (!_navigationController.isClosed) {
       await _navigationController.close();
+    }
+    if (!_crashCountdownController.isClosed) {
+      await _crashCountdownController.close();
     }
   }
 }

@@ -12,7 +12,13 @@ class EnvConfig {
       dotenv.env['APPWRITE_DATABASE_ID'] ?? 'guardian-wheel-db';
 
   static String get googleMapsApiKey =>
-      'AIzaSyAIuA7LFTgIjy1dZCOUYVikpMDuwh3L-P4';
+      dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+
+  static String get googleAndroidPackage =>
+      dotenv.env['GOOGLE_ANDROID_PACKAGE'] ?? '';
+
+  static String get googleAndroidSha1 =>
+      dotenv.env['GOOGLE_ANDROID_SHA1'] ?? '';
 
   static String get appUserId =>
       dotenv.env['APP_USER_ID'] ?? '1';

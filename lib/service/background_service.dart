@@ -40,7 +40,8 @@ Future<void> initializeBackgroundService() async {
   final flnPlugin = FlutterLocalNotificationsPlugin();
   await flnPlugin
       .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
+        AndroidFlutterLocalNotificationsPlugin
+      >()
       ?.createNotificationChannel(androidChannel);
 
   await service.configure(
@@ -89,10 +90,16 @@ void _onStart(ServiceInstance service) async {
   double lastSpeed = 0;
   double lastGyroMagnitude = 0;
   DateTime? lastCrashTime;
+  DateTime? crashImpactStart;
+  double crashPeakImpactG = 0;
+  final List<_SpeedSample> speedHistory = [];
 
   const double crashThresholdG = 4.0;
-  const double crashThresholdWithRotationG = 3.0;
-  const double rotationCrashThreshold = 5.0;
+  const double rotationCrashThreshold = 4.5;
+  const crashMinImpactDuration = Duration(milliseconds: 500);
+  const double crashFinalSpeedMaxKmh = 5.0;
+  const double crashMinRapidDropKmh = 15.0;
+  const crashSpeedDropWindow = Duration(seconds: 3);
   const crashCooldown = Duration(seconds: 10);
 
   // ---- helpers --------------------------------------------------------
@@ -103,6 +110,14 @@ void _onStart(ServiceInstance service) async {
 
     final speedKmh = pos.speed * 3.6;
     if (speedKmh > 0) {
+      speedHistory.add(
+        _SpeedSample(speedKmh: speedKmh, timestamp: DateTime.now().toUtc()),
+      );
+      speedHistory.removeWhere(
+        (sample) =>
+            DateTime.now().toUtc().difference(sample.timestamp) >
+            crashSpeedDropWindow,
+      );
       if (speedKmh > maxSpeed) maxSpeed = speedKmh;
       totalSpeed += speedKmh;
       speedSamples++;
@@ -129,7 +144,8 @@ void _onStart(ServiceInstance service) async {
 
   void handleCrash(double impactG, {double? rotationRate}) {
     final now = DateTime.now().toUtc();
-    if (lastCrashTime != null && now.difference(lastCrashTime!) < crashCooldown) {
+    if (lastCrashTime != null &&
+        now.difference(lastCrashTime!) < crashCooldown) {
       return;
     }
     lastCrashTime = now;
@@ -139,8 +155,8 @@ void _onStart(ServiceInstance service) async {
     final severity = impactG >= 8.0
         ? 'critical'
         : impactG >= 6.0 || rotation >= 8.0
-            ? 'high'
-            : 'medium';
+        ? 'high'
+        : 'medium';
 
     service.invoke(BgKeys.crashDetected, {
       'lat': lastLat,
@@ -156,7 +172,8 @@ void _onStart(ServiceInstance service) async {
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
         title: '⚠️ CRASH DETECTED',
-        content: 'Impact: ${impactG.toStringAsFixed(1)}G • Rot: ${rotation.toStringAsFixed(1)} — Emergency alert sent',
+        content:
+            'Impact: ${impactG.toStringAsFixed(1)}G • Rot: ${rotation.toStringAsFixed(1)} — Emergency alert sent',
       );
     }
   }
@@ -170,47 +187,80 @@ void _onStart(ServiceInstance service) async {
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(
-      sendLocation,
-      onError: (_) {},
-    );
+    ).listen(sendLocation, onError: (_) {});
 
     // Accelerometer for crash detection
     accelSub?.cancel();
-    accelSub = accelerometerEventStream(
-      samplingPeriod: const Duration(milliseconds: 100),
-    ).listen((event) {
-      final gForce = math.sqrt(
-            event.x * event.x + event.y * event.y + event.z * event.z,
-          ) /
-          9.81;
+    accelSub =
+        accelerometerEventStream(
+          samplingPeriod: const Duration(milliseconds: 100),
+        ).listen((event) {
+          final gForce =
+              math.sqrt(
+                event.x * event.x + event.y * event.y + event.z * event.z,
+              ) /
+              9.81;
 
-      final likelyCrash = gForce >= crashThresholdG ||
-          (gForce >= crashThresholdWithRotationG &&
-              lastGyroMagnitude >= rotationCrashThreshold);
+          final now = DateTime.now().toUtc();
+          if (gForce >= crashThresholdG) {
+            crashImpactStart ??= now;
+            if (gForce > crashPeakImpactG) {
+              crashPeakImpactG = gForce;
+            }
+            return;
+          }
 
-      if (likelyCrash) {
-        handleCrash(gForce, rotationRate: lastGyroMagnitude);
-      }
-    });
+          final impactStart = crashImpactStart;
+          if (impactStart == null) {
+            return;
+          }
+
+          final impactDuration = now.difference(impactStart);
+          final currentSpeedKmh = lastSpeed * 3.6;
+          var maxRecentSpeed = 0.0;
+          for (final sample in speedHistory) {
+            if (sample.speedKmh > maxRecentSpeed) {
+              maxRecentSpeed = sample.speedKmh;
+            }
+          }
+          final rapidDrop =
+              (maxRecentSpeed - currentSpeedKmh) >= crashMinRapidDropKmh;
+          final speedNearZero = currentSpeedKmh <= crashFinalSpeedMaxKmh;
+          final hasRotation = lastGyroMagnitude >= rotationCrashThreshold;
+
+          if (impactDuration >= crashMinImpactDuration &&
+              rapidDrop &&
+              speedNearZero &&
+              hasRotation) {
+            handleCrash(crashPeakImpactG, rotationRate: lastGyroMagnitude);
+          }
+
+          crashImpactStart = null;
+          crashPeakImpactG = 0;
+        });
 
     // Gyroscope for movement + orientation change monitoring
     gyroSub?.cancel();
-    gyroSub = gyroscopeEventStream(
-      samplingPeriod: const Duration(milliseconds: 100),
-    ).listen((event) {
-      lastGyroMagnitude =
-          math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+    gyroSub =
+        gyroscopeEventStream(
+          samplingPeriod: const Duration(milliseconds: 100),
+        ).listen((event) {
+          lastGyroMagnitude = math.sqrt(
+            event.x * event.x + event.y * event.y + event.z * event.z,
+          );
 
-      service.invoke(BgKeys.motionUpdate, {
-        'rotationRate': lastGyroMagnitude,
-        'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
-      });
-    });
+          service.invoke(BgKeys.motionUpdate, {
+            'rotationRate': lastGyroMagnitude,
+            'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
+          });
+        });
 
     // Periodic telemetry push every 5s
     telemetryTimer?.cancel();
-    telemetryTimer = Timer.periodic(const Duration(seconds: 5), (_) => sendTelemetry());
+    telemetryTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => sendTelemetry(),
+    );
 
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
@@ -233,6 +283,9 @@ void _onStart(ServiceInstance service) async {
     totalSpeed = 0;
     speedSamples = 0;
     lastGyroMagnitude = 0;
+    crashImpactStart = null;
+    crashPeakImpactG = 0;
+    speedHistory.clear();
 
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
@@ -262,4 +315,11 @@ void _onStart(ServiceInstance service) async {
 
   // Auto-start sensors immediately when service starts
   startSensors();
+}
+
+class _SpeedSample {
+  const _SpeedSample({required this.speedKmh, required this.timestamp});
+
+  final double speedKmh;
+  final DateTime timestamp;
 }

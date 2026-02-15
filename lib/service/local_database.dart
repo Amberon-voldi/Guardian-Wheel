@@ -24,8 +24,9 @@ class LocalDatabase {
     final dbPath = join(dir.path, 'guardian_wheel.db');
     return openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -137,6 +138,36 @@ class LocalDatabase {
         attempts INTEGER NOT NULL DEFAULT 0
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE map_cache_points (
+        id TEXT PRIMARY KEY,
+        point_type TEXT NOT NULL,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
+        title TEXT,
+        subtitle TEXT,
+        intensity REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS map_cache_points (
+          id TEXT PRIMARY KEY,
+          point_type TEXT NOT NULL,
+          lat REAL NOT NULL,
+          lng REAL NOT NULL,
+          title TEXT,
+          subtitle TEXT,
+          intensity REAL NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+    }
   }
 
   // ── Rides ─────────────────────────────────────────
@@ -245,6 +276,36 @@ class LocalDatabase {
     final db = await database;
     return db.query(
       'puncture_shops',
+      where: 'lat >= ? AND lat <= ? AND lng >= ? AND lng <= ?',
+      whereArgs: [minLat, maxLat, minLng, maxLng],
+    );
+  }
+
+  // ── Offline Map Cache ────────────────────────────
+
+  Future<void> upsertMapCachePoints(List<Map<String, dynamic>> points) async {
+    if (points.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final point in points) {
+      batch.insert(
+        'map_cache_points',
+        point,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getNearbyMapCachePoints(
+    double minLat,
+    double maxLat,
+    double minLng,
+    double maxLng,
+  ) async {
+    final db = await database;
+    return db.query(
+      'map_cache_points',
       where: 'lat >= ? AND lat <= ? AND lng >= ? AND lng <= ?',
       whereArgs: [minLat, maxLat, minLng, maxLng],
     );

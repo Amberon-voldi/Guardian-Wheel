@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-
 import 'app/guardian_wheel_app.dart';
 import 'service/background_service.dart';
 

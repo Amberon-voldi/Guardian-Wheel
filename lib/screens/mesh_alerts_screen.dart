@@ -26,6 +26,7 @@ class MeshAlertsScreen extends StatefulWidget {
 class _MeshAlertsScreenState extends State<MeshAlertsScreen> {
   final List<MeshPacketState> _packets = [];
   StreamSubscription<MeshPacketState>? _sub;
+  StreamSubscription<int>? _peerSub;
 
   @override
   void initState() {
@@ -38,11 +39,16 @@ class _MeshAlertsScreenState extends State<MeshAlertsScreen> {
         });
       }
     });
+
+    _peerSub = widget.meshService.peerCountStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _peerSub?.cancel();
     super.dispose();
   }
 
@@ -51,6 +57,8 @@ class _MeshAlertsScreenState extends State<MeshAlertsScreen> {
     final theme = Theme.of(context);
     final critical = _packets.where((p) =>
         p.status == MeshPacketStatus.created ||
+      p.status == MeshPacketStatus.received ||
+      p.status == MeshPacketStatus.forwarded ||
         p.status == MeshPacketStatus.forwarding).toList();
     final resolved = _packets.where((p) =>
         p.status == MeshPacketStatus.delivered ||

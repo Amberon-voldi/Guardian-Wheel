@@ -69,10 +69,16 @@ class LocationService {
 
   // Crash detection parameters (foreground fallback)
   static const double _crashThresholdG = 4.0;
-  static const double _crashThresholdWithRotationG = 3.0;
-  static const double _rotationCrashThreshold = 5.0;
+  static const double _rotationCrashThreshold = 4.5;
+  static const Duration _crashMinImpactDuration = Duration(milliseconds: 500);
+  static const double _crashFinalSpeedMaxKmh = 5.0;
+  static const double _crashMinRapidDropKmh = 15.0;
+  static const Duration _crashSpeedDropWindow = Duration(seconds: 3);
   static const Duration _crashCooldown = Duration(seconds: 10);
   DateTime? _lastCrashTime;
+  DateTime? _crashImpactStart;
+  double _crashPeakImpactG = 0;
+  final List<_SpeedSample> _speedHistory = [];
 
   Stream<LocationPoint> get locationStream => _locationController.stream;
   Stream<CrashEvent> get crashStream => _crashController.stream;
@@ -117,7 +123,11 @@ class LocationService {
       // Fall through to fallback
     }
     return _lastPoint ??
-        LocationPoint(lat: 12.9716, lng: 77.5946, timestamp: DateTime.now().toUtc());
+        LocationPoint(
+          lat: 12.9716,
+          lng: 77.5946,
+          timestamp: DateTime.now().toUtc(),
+        );
   }
 
   /// Start tracking via the background service (foreground notification on
@@ -169,6 +179,7 @@ class LocationService {
 
       if (point.speed != null && point.speed! > 0) {
         final speedKmh = point.speed! * 3.6;
+        _recordSpeed(speedKmh, point.timestamp);
         if (speedKmh > _maxSpeed) _maxSpeed = speedKmh;
         _totalSpeed += speedKmh;
         _speedSamples++;
@@ -195,13 +206,15 @@ class LocationService {
       _lastPoint = location;
 
       if (!_crashController.isClosed) {
-        _crashController.add(CrashEvent(
-          location: location,
-          timestamp: now,
-          severity: (data['severity'] as String?) ?? 'high',
-          impactG: (data['impactG'] as num?)?.toDouble() ?? 0,
-          rotationRate: (data['rotationRate'] as num?)?.toDouble() ?? 0,
-        ));
+        _crashController.add(
+          CrashEvent(
+            location: location,
+            timestamp: now,
+            severity: (data['severity'] as String?) ?? 'high',
+            impactG: (data['impactG'] as num?)?.toDouble() ?? 0,
+            rotationRate: (data['rotationRate'] as num?)?.toDouble() ?? 0,
+          ),
+        );
       }
     });
 
@@ -230,59 +243,58 @@ class LocationService {
   /// Foreground-only fallback (same as before, used if bg service unavailable).
   void _startForegroundTracking() {
     _positionSub?.cancel();
-    _positionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 5,
-      ),
-    ).listen(
-      (pos) {
-        final point = LocationPoint(
-          lat: pos.latitude,
-          lng: pos.longitude,
-          timestamp: pos.timestamp,
-          speed: pos.speed,
-          accuracy: pos.accuracy,
-        );
-        if (pos.speed > 0) {
-          final speedKmh = pos.speed * 3.6;
-          if (speedKmh > _maxSpeed) _maxSpeed = speedKmh;
-          _totalSpeed += speedKmh;
-          _speedSamples++;
-        }
-        _lastPoint = point;
-        if (!_locationController.isClosed) {
-          _locationController.add(point);
-        }
-      },
-      onError: (_) {},
-    );
+    _positionSub =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 5,
+          ),
+        ).listen((pos) {
+          final point = LocationPoint(
+            lat: pos.latitude,
+            lng: pos.longitude,
+            timestamp: pos.timestamp,
+            speed: pos.speed,
+            accuracy: pos.accuracy,
+          );
+          if (pos.speed > 0) {
+            final speedKmh = pos.speed * 3.6;
+            _recordSpeed(speedKmh, pos.timestamp);
+            if (speedKmh > _maxSpeed) _maxSpeed = speedKmh;
+            _totalSpeed += speedKmh;
+            _speedSamples++;
+          }
+          _lastPoint = point;
+          if (!_locationController.isClosed) {
+            _locationController.add(point);
+          }
+        }, onError: (_) {});
 
     _accelSub?.cancel();
-    _accelSub = accelerometerEventStream(
-      samplingPeriod: const Duration(milliseconds: 100),
-    ).listen((event) {
-      final gForce = math.sqrt(
-            event.x * event.x + event.y * event.y + event.z * event.z,
-          ) /
-          9.81;
-
-      final likelyCrash = gForce >= _crashThresholdG ||
-          (gForce >= _crashThresholdWithRotationG &&
-              _latestRotationRate >= _rotationCrashThreshold);
-
-      if (likelyCrash) {
-        _handlePotentialCrash(gForce, rotationRate: _latestRotationRate);
-      }
-    });
+    _accelSub =
+        accelerometerEventStream(
+          samplingPeriod: const Duration(milliseconds: 100),
+        ).listen((event) {
+          final gForce =
+              math.sqrt(
+                event.x * event.x + event.y * event.y + event.z * event.z,
+              ) /
+              9.81;
+          _processCrashFromAcceleration(
+            gForce,
+            rotationRate: _latestRotationRate,
+          );
+        });
 
     _gyroSub?.cancel();
-    _gyroSub = gyroscopeEventStream(
-      samplingPeriod: const Duration(milliseconds: 100),
-    ).listen((event) {
-      _latestRotationRate =
-          math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
-    });
+    _gyroSub =
+        gyroscopeEventStream(
+          samplingPeriod: const Duration(milliseconds: 100),
+        ).listen((event) {
+          _latestRotationRate = math.sqrt(
+            event.x * event.x + event.y * event.y + event.z * event.z,
+          );
+        });
   }
 
   void _handlePotentialCrash(double impactG, {double rotationRate = 0}) {
@@ -293,12 +305,13 @@ class LocationService {
     }
     _lastCrashTime = now;
 
-    final location = _lastPoint ?? LocationPoint(lat: 0, lng: 0, timestamp: now);
+    final location =
+        _lastPoint ?? LocationPoint(lat: 0, lng: 0, timestamp: now);
     final severity = impactG >= 8.0
         ? 'critical'
         : impactG >= 6.0
-            ? 'high'
-            : 'medium';
+        ? 'high'
+        : 'medium';
 
     if (!_crashController.isClosed) {
       _crashController.add(
@@ -313,6 +326,66 @@ class LocationService {
     }
   }
 
+  void _processCrashFromAcceleration(
+    double impactG, {
+    double rotationRate = 0,
+  }) {
+    final now = DateTime.now().toUtc();
+
+    if (impactG >= _crashThresholdG) {
+      _crashImpactStart ??= now;
+      if (impactG > _crashPeakImpactG) {
+        _crashPeakImpactG = impactG;
+      }
+      return;
+    }
+
+    final impactStart = _crashImpactStart;
+    if (impactStart == null) {
+      return;
+    }
+
+    final impactDuration = now.difference(impactStart);
+    final speedKmh = (_lastPoint?.speed ?? 0) * 3.6;
+    final speedDroppedRapidly = _hasRapidSpeedDrop(now, speedKmh);
+    final speedNearZero = speedKmh <= _crashFinalSpeedMaxKmh;
+    final hasRotation = rotationRate >= _rotationCrashThreshold;
+
+    if (impactDuration >= _crashMinImpactDuration &&
+        speedNearZero &&
+        speedDroppedRapidly &&
+        hasRotation) {
+      _handlePotentialCrash(_crashPeakImpactG, rotationRate: rotationRate);
+    }
+
+    _crashImpactStart = null;
+    _crashPeakImpactG = 0;
+  }
+
+  void _recordSpeed(double speedKmh, DateTime timestamp) {
+    _speedHistory.add(_SpeedSample(speedKmh: speedKmh, timestamp: timestamp));
+    _speedHistory.removeWhere(
+      (sample) =>
+          timestamp.difference(sample.timestamp) > _crashSpeedDropWindow,
+    );
+  }
+
+  bool _hasRapidSpeedDrop(DateTime now, double currentSpeedKmh) {
+    if (_speedHistory.isEmpty) {
+      return false;
+    }
+    var maxRecentSpeed = _speedHistory.first.speedKmh;
+    for (final sample in _speedHistory) {
+      if (now.difference(sample.timestamp) > _crashSpeedDropWindow) {
+        continue;
+      }
+      if (sample.speedKmh > maxRecentSpeed) {
+        maxRecentSpeed = sample.speedKmh;
+      }
+    }
+    return (maxRecentSpeed - currentSpeedKmh) >= _crashMinRapidDropKmh;
+  }
+
   void simulateCrash({String severity = 'high'}) {
     if (_backgroundRunning) {
       FlutterBackgroundService().invoke(BgKeys.simulateCrash);
@@ -320,7 +393,8 @@ class LocationService {
     }
     // Foreground fallback
     final now = DateTime.now().toUtc();
-    final location = _lastPoint ?? LocationPoint(lat: 12.9716, lng: 77.5946, timestamp: now);
+    final location =
+        _lastPoint ?? LocationPoint(lat: 12.9716, lng: 77.5946, timestamp: now);
     if (!_crashController.isClosed) {
       _crashController.add(
         CrashEvent(
@@ -353,6 +427,9 @@ class LocationService {
     _accelSub = null;
     _gyroSub?.cancel();
     _gyroSub = null;
+    _speedHistory.clear();
+    _crashImpactStart = null;
+    _crashPeakImpactG = 0;
   }
 
   /// Fully stop the background service process.
@@ -381,4 +458,11 @@ class LocationService {
       await _crashController.close();
     }
   }
+}
+
+class _SpeedSample {
+  const _SpeedSample({required this.speedKmh, required this.timestamp});
+
+  final double speedKmh;
+  final DateTime timestamp;
 }

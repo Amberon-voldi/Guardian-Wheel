@@ -61,6 +61,7 @@ dependencies:
   flutter_background_service: ^5.1.0
   flutter_local_notifications: ^18.0.1
   url_launcher: ^6.1.13
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -94,6 +95,9 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/logo.png
+    - assets/potholes_mark.png
+    - assets/puncture_mark.png
+    - assets/sound/
     - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see

@@ -90,7 +90,7 @@ class _SosCommandScreenState extends State<SosCommandScreen> {
     final theme = Theme.of(context);
     final lat = _currentLocation?.lat ?? 0;
     final lng = _currentLocation?.lng ?? 0;
-    final speed = _currentLocation?.speed;
+    final speed = 0;
     final hasLocation = _currentLocation != null;
 
     return Scaffold(
@@ -162,38 +162,6 @@ class _SosCommandScreenState extends State<SosCommandScreen> {
             ),
 
             const SizedBox(height: 24),
-
-            // ── Ride Controls ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _RideActionCard(
-                      icon: Icons.play_arrow_rounded,
-                      label: 'Start Ride',
-                      subtitle: 'Begin tracking',
-                      color: GuardianTheme.success,
-                      onTap: widget.rideStatus == RideStatus.completed
-                          ? widget.onStartRide
-                          : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _RideActionCard(
-                      icon: Icons.stop_rounded,
-                      label: 'End Ride',
-                      subtitle: 'Stop tracking',
-                      color: GuardianTheme.danger,
-                      onTap: widget.rideStatus == RideStatus.completed
-                          ? null
-                          : widget.onEndRide,
-                    ),
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 4),
             TextButton.icon(
               onPressed: widget.onSimulateCrash,
@@ -224,9 +192,7 @@ class _SosCommandScreenState extends State<SosCommandScreen> {
                   Expanded(
                     child: _TelemetryCard(
                       title: 'Speed',
-                      value: speed != null
-                          ? (speed * 3.6).toStringAsFixed(1)
-                          : '0.0',
+                      value: (speed * 3.6).toStringAsFixed(1),
                       subtitle: 'km/h',
                       icon: Icons.speed,
                     ),
@@ -456,75 +422,6 @@ class _GpsBadge extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RideActionCard extends StatelessWidget {
-  const _RideActionCard({
-    required this.icon,
-    required this.label,
-    required this.subtitle,
-    required this.color,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String subtitle;
-  final Color color;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = onTap == null;
-    final effectiveColor = disabled ? Colors.grey.shade400 : color;
-
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: disabled
-                  ? Colors.grey.shade200
-                  : effectiveColor.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: effectiveColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: effectiveColor, size: 26),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  color: disabled ? Colors.grey.shade400 : GuardianTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: TextStyle(
-                    fontSize: 11, color: Colors.grey.shade500),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

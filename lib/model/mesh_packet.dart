@@ -52,6 +52,8 @@ class MeshPacket {
 
 enum MeshPacketStatus {
   created,
+  received,
+  forwarded,
   forwarding,
   delivered,
   expired,

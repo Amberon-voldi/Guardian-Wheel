@@ -9,11 +9,13 @@ class RiderProfileScreen extends StatefulWidget {
   const RiderProfileScreen({
     required this.userId,
     required this.userProfileService,
+    this.onOpenDetectionsPage,
     super.key,
   });
 
   final String userId;
   final UserProfileService userProfileService;
+  final VoidCallback? onOpenDetectionsPage;
 
   @override
   State<RiderProfileScreen> createState() => _RiderProfileScreenState();
@@ -174,6 +176,17 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                       ),
                     ],
                   ),
+                  if (widget.onOpenDetectionsPage != null) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: widget.onOpenDetectionsPage,
+                        icon: const Icon(Icons.sensors),
+                        label: const Text('Open Sensor Detections (Temp)'),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   CircleAvatar(
                     radius: 44,
