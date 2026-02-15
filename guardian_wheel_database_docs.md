@@ -23,7 +23,10 @@ This database supports rider safety, emergency handling, mesh networking, and ha
 | name | string | ✅ | Rider full name |
 | phone | string | ✅ | Contact number |
 | bike_model | string | ❌ | Optional vehicle info |
-| emergency_contact | string | ✅ | Used during SOS escalation |
+| 1_emergency_name | string | ✅ | Used during SOS escalation |
+| 1_emergency_contact | string | ✅ | Used during SOS escalation |
+| 2_emergency_name | string | ✅ | Used during SOS escalation |
+| 2_emergency_contact | string | ✅ | Used during SOS escalation |
 | blood_group | string | ❌ | Medical aid |
 | $createdAt | datetime | auto | System generated |
 | $updatedAt | datetime | auto | System generated |

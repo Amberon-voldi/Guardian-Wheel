@@ -1,9 +1,30 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+val envProps = Properties().apply {
+    val file = rootProject.file(".env")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+val googleMapsApiKey =
+    (localProps.getProperty("GOOGLE_MAPS_API_KEY")
+        ?: envProps.getProperty("GOOGLE_MAPS_API_KEY")
+        ?: "")
 
 android {
     namespace = "com.mythics.guardian_wheel"
@@ -29,6 +50,7 @@ android {
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = googleMapsApiKey
     }
 
     buildTypes {

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../config/env_config.dart';
 import '../service/local_database.dart';
 import '../service/location_service.dart';
+import '../theme/guardian_theme.dart';
 
 class HazardReportScreen extends StatefulWidget {
   const HazardReportScreen({
@@ -101,7 +102,9 @@ class _HazardReportScreenState extends State<HazardReportScreen> {
           : EnvConfig.potholesCollection;
       final remoteData = Map<String, dynamic>.from(localData)
         ..remove('id')
-        ..remove('synced');
+        ..remove('synced')
+        ..remove('created_at')
+        ..remove('updated_at');
       // Convert int booleans
       if (remoteData.containsKey('verified')) {
         remoteData['verified'] = false;
@@ -140,7 +143,13 @@ class _HazardReportScreenState extends State<HazardReportScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Report Hazard')),
+      appBar: AppBar(
+        title: const Text('Report Hazard'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -149,7 +158,9 @@ class _HazardReportScreenState extends State<HazardReportScreen> {
               Expanded(
                 child: ListView(
                   children: [
-                    Text('Select Hazard Type', style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700)),
+                    Text('Select Hazard Type', style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800, letterSpacing: -0.2,
+                    )),
                     const SizedBox(height: 10),
                     GridView.builder(
                       itemCount: _types.length,
@@ -174,14 +185,26 @@ class _HazardReportScreenState extends State<HazardReportScreen> {
                                 color: isSelected ? theme.colorScheme.primary : const Color(0xFFE0E0E0),
                                 width: isSelected ? 2 : 1,
                               ),
-                              color: Colors.white,
+                              color: isSelected
+                                  ? theme.colorScheme.primary.withValues(alpha: 0.04)
+                                  : Colors.white,
                             ),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(item.$1, size: 40, color: isSelected ? theme.colorScheme.primary : Colors.grey.shade600),
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: (isSelected ? theme.colorScheme.primary : GuardianTheme.textSecondary).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(item.$1, size: 28, color: isSelected ? theme.colorScheme.primary : GuardianTheme.textSecondary),
+                                ),
                                 const SizedBox(height: 8),
-                                Text(item.$2, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                                Text(item.$2, style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: isSelected ? theme.colorScheme.primary : GuardianTheme.textPrimary,
+                                )),
                               ],
                             ),
                           ),

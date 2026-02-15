@@ -21,6 +21,7 @@ import '../service/mesh_service.dart';
 import '../service/ride_service.dart';
 import '../service/safety_service.dart';
 import '../service/sync_service.dart';
+import '../service/user_profile_service.dart';
 import '../theme/guardian_theme.dart';
 import '../widgets/guardian_bottom_nav.dart';
 
@@ -47,10 +48,9 @@ class GuardianShell extends StatefulWidget {
 }
 
 class _GuardianShellState extends State<GuardianShell> {
-  int index = 0;
-
   late final Client _client;
   late final Databases _databases;
+  late final Account _account;
   late final Realtime _realtime;
 
   late final MeshService _meshService;
@@ -60,11 +60,15 @@ class _GuardianShellState extends State<GuardianShell> {
   late final SyncService _syncService;
   late final RideController _rideController;
   late final AlertController _alertController;
+  late final UserProfileService _userProfileService;
 
   StreamSubscription<RideNavigationEvent>? _rideNavigationSub;
   StreamSubscription<RideStatus>? _rideStatusSub;
+  StreamSubscription<int>? _meshPeerCountSub;
+  StreamSubscription<LocationPoint>? _locationMeshNodeSub;
 
-  static const String _currentRiderId = 'RIDER-KA-05-9922';
+  late final String _currentRiderId;
+  int _currentTab = 0;
 
   @override
   void initState() {
@@ -75,11 +79,21 @@ class _GuardianShellState extends State<GuardianShell> {
         .setEndpoint(EnvConfig.appwriteEndpoint)
         .setProject(EnvConfig.appwriteProjectId);
     _databases = Databases(_client);
+    _account = Account(_client);
     _realtime = Realtime(_client);
+    _currentRiderId = EnvConfig.appUserId;
+
+    _ensureSession();
 
     // Services
     _locationService = LocationService();
-    _meshService = MeshService(bleMesh: BleMeshService());
+    _meshService = MeshService(
+      bleMesh: BleMeshService(),
+      databases: _databases,
+      databaseId: EnvConfig.appwriteDatabaseId,
+      meshNodesCollectionId: EnvConfig.meshNodesCollection,
+    );
+    _userProfileService = UserProfileService(databases: _databases);
 
     _rideService = RideService(
       databases: _databases,
@@ -112,7 +126,7 @@ class _GuardianShellState extends State<GuardianShell> {
     )..startListening();
 
     // Start BLE mesh scanning
-    _meshService.startBleMesh();
+    _meshService.startBleMesh(currentUserId: _currentRiderId);
 
     _rideNavigationSub = _rideController.navigationEvents.listen((event) {
       if (!mounted) return;
@@ -126,92 +140,166 @@ class _GuardianShellState extends State<GuardianShell> {
     _rideStatusSub = _rideController.statusStream.listen((_) {
       if (mounted) setState(() {});
     });
+
+    _meshPeerCountSub = _meshService.peerCountStream.listen((_) {
+      if (mounted) setState(() {});
+    });
+
+    _locationMeshNodeSub = _locationService.locationStream.listen((point) {
+      _meshService.updateSelfNode(
+        userId: _currentRiderId,
+        lat: point.lat,
+        lng: point.lng,
+        isActive: true,
+      );
+    });
+  }
+
+  Future<void> _ensureSession() async {
+    try {
+      await _account.get();
+    } catch (_) {
+      try {
+        await _account.createAnonymousSession();
+      } catch (_) {
+        // Non-blocking: app remains offline-first.
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final screens = [
-      AnimatedBuilder(
-        animation: Listenable.merge([_alertController]),
-        builder: (_, __) => SosCommandScreen(
-          onOpenRedAlert: _triggerManualSos,
-          onStartRide: _startRide,
-          onEndRide: _endRide,
-          onSimulateCrash: () => _locationService.simulateCrash(),
-          rideStatus: _rideController.status,
-          meshPeerCount: _meshService.peerCount,
-          locationService: _locationService,
-        ),
-      ),
-      AnimatedBuilder(
-        animation: _alertController,
-        builder: (_, __) => TacticalMapScreen(
-          onReportHazard: _openHazardReport,
-          incomingRoute: _alertController.navigationRoute,
-          locationService: _locationService,
-        ),
-      ),
-      MeshAlertsScreen(
-        onOpenAdmin: _openAdminView,
-        meshService: _meshService,
-        alertController: _alertController,
-      ),
-      const RiderProfileScreen(),
-    ];
-
     return Scaffold(
       body: Stack(
         children: [
-          IndexedStack(index: index, children: screens),
-          // Incoming help overlay
+          // ── Tab pages ──
+          IndexedStack(
+            index: _currentTab,
+            children: [
+              // Tab 0: Map
+              AnimatedBuilder(
+                animation: _alertController,
+                builder: (_, __) => TacticalMapScreen(
+                  onReportHazard: _openHazardReport,
+                  incomingRoute: _alertController.navigationRoute,
+                  locationService: _locationService,
+                ),
+              ),
+
+              // Tab 1: Ride / SOS
+              SosCommandScreen(
+                onOpenRedAlert: _triggerManualSos,
+                onStartRide: _startRide,
+                onEndRide: _endRide,
+                onSimulateCrash: () => _locationService.simulateCrash(),
+                rideStatus: _rideController.status,
+                meshPeerCount: _meshService.peerCount,
+                locationService: _locationService,
+              ),
+
+              // Tab 2: Mesh Alerts
+              MeshAlertsScreen(
+                onOpenAdmin: _openAdminView,
+                meshService: _meshService,
+                alertController: _alertController,
+              ),
+
+              // Tab 3: Profile
+              RiderProfileScreen(
+                userId: _currentRiderId,
+                userProfileService: _userProfileService,
+              ),
+            ],
+          ),
+
+          // ── Incoming help request overlay ──
           AnimatedBuilder(
             animation: _alertController,
             builder: (_, __) {
-              if (!_alertController.showIncomingHelpUi || _alertController.incomingPacket == null) {
+              if (!_alertController.showIncomingHelpUi ||
+                  _alertController.incomingPacket == null) {
                 return const SizedBox.shrink();
               }
               final packet = _alertController.incomingPacket!;
               return Positioned(
-                left: 12,
-                right: 12,
-                bottom: 90,
-                child: Card(
-                  elevation: 4,
+                left: 16,
+                right: 16,
+                bottom: 100,
+                child: Material(
+                  elevation: 8,
+                  shadowColor: GuardianTheme.danger.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(20),
+                  color: Colors.white,
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(16),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.emergency, color: Theme.of(context).colorScheme.error, size: 20),
-                            const SizedBox(width: 8),
-                            const Text('Incoming Help Request', style: TextStyle(fontWeight: FontWeight.w800)),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: GuardianTheme.danger
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.emergency,
+                                  color: GuardianTheme.danger, size: 22),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Incoming Help Request',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Rider: ${packet.origin} • Hop: ${packet.hop}',
+                                    style: const TextStyle(
+                                      color: GuardianTheme.textSecondary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 6),
-                        Text('Rider: ${packet.origin} • Hop: ${packet.hop}'),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 14),
                         Row(
                           children: [
                             Expanded(
                               child: OutlinedButton(
-                                onPressed: _alertController.dismissIncomingHelp,
+                                onPressed:
+                                    _alertController.dismissIncomingHelp,
                                 child: const Text('Dismiss'),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 10),
                             Expanded(
-                              child: FilledButton(
+                              child: FilledButton.icon(
                                 onPressed: () {
                                   _alertController.acceptIncomingHelp(
-                                    currentLat: _rideController.latestLocation?.lat ?? 12.9716,
-                                    currentLng: _rideController.latestLocation?.lng ?? 77.5946,
+                                    currentLat:
+                                        _rideController.latestLocation?.lat ??
+                                            12.9716,
+                                    currentLng:
+                                        _rideController.latestLocation?.lng ??
+                                            77.5946,
                                   );
-                                  setState(() => index = 1);
+                                  // Switch to map tab to show route
+                                  setState(() => _currentTab = 0);
                                 },
-                                child: const Text('Accept & Route'),
+                                icon:
+                                    const Icon(Icons.navigation, size: 18),
+                                label: const Text('Accept & Route'),
                               ),
                             ),
                           ],
@@ -226,11 +314,13 @@ class _GuardianShellState extends State<GuardianShell> {
         ],
       ),
       bottomNavigationBar: GuardianBottomNav(
-        currentIndex: index,
-        onTap: (value) => setState(() => index = value),
+        currentIndex: _currentTab,
+        onTap: (i) => setState(() => _currentTab = i),
       ),
     );
   }
+
+  // ── Actions ──
 
   Future<void> _startRide() async {
     await _rideController.startRide();
@@ -272,8 +362,16 @@ class _GuardianShellState extends State<GuardianShell> {
   void dispose() {
     _rideNavigationSub?.cancel();
     _rideStatusSub?.cancel();
+    _meshPeerCountSub?.cancel();
+    _locationMeshNodeSub?.cancel();
     _alertController.dispose();
     _rideController.dispose();
+    _meshService.updateSelfNode(
+      userId: _currentRiderId,
+      lat: _rideController.latestLocation?.lat ?? 0,
+      lng: _rideController.latestLocation?.lng ?? 0,
+      isActive: false,
+    );
     _locationService.dispose();
     _safetyService.dispose();
     _meshService.dispose();

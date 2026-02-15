@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../controller/alert_controller.dart';
 import '../model/mesh_packet.dart';
 import '../service/mesh_service.dart';
+import '../theme/guardian_theme.dart';
 
 class MeshAlertsScreen extends StatefulWidget {
   const MeshAlertsScreen({
@@ -64,30 +65,54 @@ class _MeshAlertsScreenState extends State<MeshAlertsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Mesh Alerts', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: const Color(0xFFE8E8E8)),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Mesh Alerts', style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w900, letterSpacing: -0.5,
+                        )),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Nearby rider communication',
+                          style: theme.textTheme.bodySmall?.copyWith(color: GuardianTheme.textSecondary),
                         ),
-                        child: Text(
-                          'LIVE: ${widget.meshService.peerCount} NODES',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: GuardianTheme.meshBlue.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: GuardianTheme.meshBlue.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8, height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: widget.meshService.peerCount > 0 ? GuardianTheme.success : GuardianTheme.textSecondary,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        onPressed: widget.onOpenAdmin,
-                        icon: const Icon(Icons.admin_panel_settings_outlined),
-                        tooltip: 'Open Admin View',
-                      ),
-                    ],
+                        const SizedBox(width: 6),
+                        Text(
+                          '${widget.meshService.peerCount} NODES',
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: GuardianTheme.meshBlue),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    onPressed: widget.onOpenAdmin,
+                    icon: const Icon(Icons.admin_panel_settings_outlined),
+                    tooltip: 'Open Admin View',
+                    style: IconButton.styleFrom(backgroundColor: Colors.grey.shade100),
                   ),
                 ],
               ),
@@ -98,16 +123,26 @@ class _MeshAlertsScreenState extends State<MeshAlertsScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.wifi_tethering, size: 48, color: Colors.grey.shade400),
-                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: GuardianTheme.meshBlue.withValues(alpha: 0.06),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(Icons.cell_tower, size: 48, color: GuardianTheme.meshBlue.withValues(alpha: 0.4)),
+                            ),
+                            const SizedBox(height: 16),
                             Text(
                               'No mesh activity yet',
-                              style: theme.textTheme.titleMedium?.copyWith(color: Colors.grey.shade500),
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: GuardianTheme.textPrimary, fontWeight: FontWeight.w700,
+                              ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 6),
                             Text(
-                              'Alerts from nearby riders will appear here',
-                              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade400),
+                              'Alerts from nearby riders will appear here\nwhen mesh peers are discovered.',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(color: GuardianTheme.textSecondary),
                             ),
                           ],
                         ),

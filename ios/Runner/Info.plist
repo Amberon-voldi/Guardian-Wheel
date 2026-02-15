@@ -47,6 +47,8 @@
 		<true/>
 		<key>UIStatusBarHidden</key>
 		<false/>
+		<key>GMSApiKey</key>
+		<string>AIzaSyAIuA7LFTgIjy1dZCOUYVikpMDuwh3L-P4</string>
 
 		<!-- Location permissions -->
 		<key>NSLocationWhenInUseUsageDescription</key>

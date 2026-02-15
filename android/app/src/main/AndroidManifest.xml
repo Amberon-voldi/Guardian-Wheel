@@ -16,7 +16,9 @@
     <!-- WiFi Direct / Nearby -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"/>
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false"/>
 
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -78,7 +80,7 @@
         <!-- Google Maps API Key (loaded from .env at runtime; set value via local.properties or here) -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="YOUR_GOOGLE_MAPS_API_KEY"/>
+            android:value="AIzaSyAIuA7LFTgIjy1dZCOUYVikpMDuwh3L-P4"/>
 
         <meta-data
             android:name="flutterEmbedding"

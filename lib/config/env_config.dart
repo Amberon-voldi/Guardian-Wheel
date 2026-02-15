@@ -12,7 +12,10 @@ class EnvConfig {
       dotenv.env['APPWRITE_DATABASE_ID'] ?? 'guardian-wheel-db';
 
   static String get googleMapsApiKey =>
-      dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+      'AIzaSyAIuA7LFTgIjy1dZCOUYVikpMDuwh3L-P4';
+
+  static String get appUserId =>
+      dotenv.env['APP_USER_ID'] ?? '1';
 
   // Collection IDs matching the Appwrite schema
   static const String usersCollection = 'users';

@@ -2,18 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../model/mesh_packet.dart';
 
-/// Bluetooth Low Energy peer-to-peer mesh networking.
-///
-/// Scans for nearby Guardian Wheel devices, exchanges SOS / alert packets
-/// via BLE advertising data, and relays packets through the mesh.
+
 class BleMeshService {
   BleMeshService({this.serviceUuid = '0000ABCD-0000-1000-8000-00805F9B34FB'});
 
   /// Custom BLE service UUID that identifies Guardian Wheel devices.
   final String serviceUuid;
+  static const int _guardianManufacturerId = 0xFFFF;
+  static const String _guardianAppSignature = 'gw_app';
 
   final StreamController<MeshPacketState> _packetController =
       StreamController<MeshPacketState>.broadcast();
@@ -21,9 +21,12 @@ class BleMeshService {
       StreamController<BleP2PEvent>.broadcast();
 
   final Set<String> _seenPacketIds = {};
+  final Set<String> _connectingPeerIds = {};
   final Map<String, BlePeer> _peers = {};
 
   StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
+  Timer? _pruneTimer;
   bool _scanning = false;
 
   Stream<MeshPacketState> get packetStates => _packetController.stream;
@@ -37,20 +40,46 @@ class BleMeshService {
     if (_scanning) return;
 
     try {
+      final hasPermission = await _ensurePermissions();
+      if (!hasPermission) {
+        _emitPeerEvent(
+          BleP2PEventType.error,
+          message: 'Bluetooth/Location permission denied. Cannot scan peers.',
+        );
+        return;
+      }
+
       final isSupported = await FlutterBluePlus.isSupported;
       if (!isSupported) {
         _emitPeerEvent(BleP2PEventType.error, message: 'BLE not supported on this device.');
         return;
       }
 
-      final adapterState = FlutterBluePlus.adapterStateNow;
+      var adapterState = FlutterBluePlus.adapterStateNow;
       if (adapterState != BluetoothAdapterState.on) {
-        _emitPeerEvent(BleP2PEventType.error, message: 'Bluetooth is off.');
+        try {
+          await FlutterBluePlus.turnOn();
+          adapterState = FlutterBluePlus.adapterStateNow;
+        } catch (_) {}
+      }
+
+      if (adapterState != BluetoothAdapterState.on) {
+        _emitPeerEvent(BleP2PEventType.error, message: 'Bluetooth is off. Turn it on to detect peers.');
         return;
       }
 
       _scanning = true;
       _emitPeerEvent(BleP2PEventType.scanStarted, message: 'BLE scan started.');
+
+      _adapterStateSub ??= FlutterBluePlus.adapterState.listen((state) {
+        if (state == BluetoothAdapterState.on && !_scanning) {
+          startScanning();
+          return;
+        }
+        if (state != BluetoothAdapterState.on && _scanning) {
+          stopScanning();
+        }
+      });
 
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 30),
@@ -61,6 +90,11 @@ class BleMeshService {
         for (final result in results) {
           _processScanResult(result);
         }
+      });
+
+      _pruneTimer?.cancel();
+      _pruneTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        pruneStale(maxAge: const Duration(seconds: 12));
       });
 
       // Restart scan periodically
@@ -80,14 +114,23 @@ class BleMeshService {
     final device = result.device;
     final name = result.advertisementData.advName;
     final rssi = result.rssi;
+    final serviceUuids = result.advertisementData.serviceUuids;
+    final mfgData = result.advertisementData.manufacturerData;
 
-    // Consider any device advertising Guardian Wheel service UUID OR
-    // whose name starts with "GW-" as a Guardian Wheel peer.
-    final isGuardianPeer = name.startsWith('GW-') ||
-        result.advertisementData.serviceUuids
-            .any((uuid) => uuid.toString().toUpperCase().contains('ABCD'));
+    final expectedUuid = serviceUuid.toUpperCase().replaceAll('-', '');
+    final hasExpectedServiceUuid = serviceUuids.any((uuid) {
+      final normalized = uuid.toString().toUpperCase().replaceAll('-', '');
+      return normalized.contains(expectedUuid);
+    });
 
-    if (!isGuardianPeer && name.isEmpty) return;
+    final guardianMfgPayload = mfgData[_guardianManufacturerId];
+    final hasGuardianSignature = guardianMfgPayload != null &&
+        utf8.decode(guardianMfgPayload, allowMalformed: true).contains(_guardianAppSignature);
+
+    // App-only detection: accept only devices with our BLE service UUID or
+    // our signed manufacturer payload. Name prefix is not trusted alone.
+    final isGuardianPeer = hasExpectedServiceUuid || hasGuardianSignature;
+    if (!isGuardianPeer) return;
 
     final peerId = device.remoteId.str;
     final isNew = !_peers.containsKey(peerId);
@@ -105,10 +148,10 @@ class BleMeshService {
         peer: _peers[peerId],
         message: 'Discovered peer: $name ($peerId)',
       );
+      _connectPeer(device, peerId);
     }
 
     // Try to extract mesh packet from manufacturer data
-    final mfgData = result.advertisementData.manufacturerData;
     if (mfgData.isNotEmpty) {
       _tryExtractPacket(mfgData, peerId);
     }
@@ -117,7 +160,7 @@ class BleMeshService {
   void _tryExtractPacket(Map<int, List<int>> mfgData, String fromPeer) {
     try {
       // We use manufacturer ID 0xFFFF (reserved for testing)
-      final data = mfgData[0xFFFF] ?? mfgData.values.first;
+      final data = mfgData[_guardianManufacturerId] ?? mfgData.values.first;
       final jsonStr = utf8.decode(data);
       final map = json.decode(jsonStr) as Map<String, dynamic>;
 
@@ -216,6 +259,8 @@ class BleMeshService {
 
   Future<void> stopScanning() async {
     _scanning = false;
+    _pruneTimer?.cancel();
+    _pruneTimer = null;
     await _scanSub?.cancel();
     _scanSub = null;
     try {
@@ -227,7 +272,20 @@ class BleMeshService {
   /// Clean up stale peers not seen in the last 60 seconds.
   void pruneStale({Duration maxAge = const Duration(seconds: 60)}) {
     final cutoff = DateTime.now().toUtc().subtract(maxAge);
-    _peers.removeWhere((_, peer) => peer.lastSeen.isBefore(cutoff));
+    final removed = <BlePeer>[];
+    _peers.removeWhere((_, peer) {
+      final stale = peer.lastSeen.isBefore(cutoff);
+      if (stale) removed.add(peer);
+      return stale;
+    });
+
+    for (final peer in removed) {
+      _emitPeerEvent(
+        BleP2PEventType.peerLost,
+        peer: peer,
+        message: 'Peer lost: ${peer.name} (${peer.id})',
+      );
+    }
   }
 
   void _emitPacket(MeshPacket packet, MeshPacketStatus status, String message) {
@@ -249,8 +307,42 @@ class BleMeshService {
 
   Future<void> dispose() async {
     await stopScanning();
+    await _adapterStateSub?.cancel();
     if (!_packetController.isClosed) await _packetController.close();
     if (!_peerController.isClosed) await _peerController.close();
+  }
+
+  Future<bool> _ensurePermissions() async {
+    final statuses = await [
+      Permission.bluetooth,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+      Permission.location,
+    ].request();
+
+    bool granted(Permission permission) {
+      final status = statuses[permission];
+      return status == PermissionStatus.granted || status == PermissionStatus.limited;
+    }
+
+    final bluetoothGranted = granted(Permission.bluetooth) || granted(Permission.bluetoothScan);
+    final locationGranted = granted(Permission.locationWhenInUse) || granted(Permission.location);
+    return bluetoothGranted && locationGranted;
+  }
+
+  void _connectPeer(BluetoothDevice device, String peerId) {
+    if (_connectingPeerIds.contains(peerId)) return;
+    _connectingPeerIds.add(peerId);
+
+    Future<void>(() async {
+      try {
+        await device.connect(timeout: const Duration(seconds: 8));
+      } catch (_) {
+      } finally {
+        _connectingPeerIds.remove(peerId);
+      }
+    });
   }
 }
 

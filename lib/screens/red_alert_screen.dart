@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme/guardian_theme.dart';
+
 class RedAlertScreen extends StatefulWidget {
   const RedAlertScreen({super.key, this.onCancel});
 
@@ -46,7 +48,7 @@ class _RedAlertScreenState extends State<RedAlertScreen> {
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           child: Column(
             children: [
               Row(
@@ -57,16 +59,36 @@ class _RedAlertScreenState extends State<RedAlertScreen> {
                 ],
               ),
               const Spacer(),
-              Icon(Icons.notification_important, size: 72, color: theme.colorScheme.error),
-              const SizedBox(height: 10),
-              Text('HELP\nREQUESTED', textAlign: TextAlign.center, style: theme.textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w900)),
-              const SizedBox(height: 10),
-              Text('Emergency Beacon Active', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.error)),
-              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: GuardianTheme.danger.withValues(alpha: 0.06),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.notification_important, size: 64, color: theme.colorScheme.error),
+              ),
+              const SizedBox(height: 16),
+              Text('HELP\nREQUESTED', textAlign: TextAlign.center, style: theme.textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w900, letterSpacing: -0.5,
+              )),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                decoration: BoxDecoration(
+                  color: GuardianTheme.danger.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('Emergency Beacon Active', style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.error, fontWeight: FontWeight.w700,
+                )),
+              ),
+              const SizedBox(height: 24),
               Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.4))),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.3))),
+                color: Colors.white,
+                elevation: 0,
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
                       Text(_elapsed, style: theme.textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w900, color: theme.colorScheme.error)),
@@ -124,8 +146,11 @@ class _RedAlertScreenState extends State<RedAlertScreen> {
 
   Widget _badge(BuildContext context, IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(999)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Row(
         children: [
           Icon(icon, size: 14, color: Colors.grey.shade700),

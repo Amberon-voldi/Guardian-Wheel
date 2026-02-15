@@ -53,9 +53,7 @@ class SyncService {
     final rows = await _localDb.getUnsynced(localTable);
     for (final row in rows) {
       final id = row['id'] as String;
-      final data = Map<String, dynamic>.from(row)
-        ..remove('id')
-        ..remove('synced');
+      final data = _toRemoteData(localTable, row);
 
       // Convert SQLite ints back to booleans for Appwrite
       _fixBooleans(data);
@@ -100,6 +98,31 @@ class SyncService {
         data[key] = value == 1;
       }
     }
+  }
+
+  Map<String, dynamic> _toRemoteData(String localTable, Map<String, dynamic> row) {
+    final data = Map<String, dynamic>.from(row)
+      ..remove('id')
+      ..remove('synced')
+      ..remove('created_at')
+      ..remove('updated_at');
+
+    switch (localTable) {
+      case 'potholes':
+        data.remove('created_at');
+        data.remove('updated_at');
+        data.remove('last_reported_at');
+        break;
+      case 'connectivity_zones':
+      case 'puncture_shops':
+      case 'rides':
+      case 'alerts':
+      default:
+        break;
+    }
+
+    data.removeWhere((_, value) => value == null);
+    return data;
   }
 
   Future<void> dispose() async {
