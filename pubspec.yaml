@@ -43,9 +43,6 @@ dependencies:
   # Google Maps
   google_maps_flutter: ^2.10.0
 
-  # BLE / P2P mesh
-  flutter_blue_plus: ^1.35.2
-
   # Local DB for offline-first
   sqflite: ^2.4.1
   path: ^1.9.1

@@ -18,7 +18,6 @@ import '../screens/rider_profile_screen.dart';
 import '../screens/sensor_detections_screen.dart';
 import '../screens/sos_command_screen.dart';
 import '../screens/tactical_map_screen.dart';
-import '../service/ble_mesh_service.dart';
 import '../service/location_service.dart';
 import '../service/mesh_service.dart';
 import '../service/ride_service.dart';
@@ -101,7 +100,6 @@ class _GuardianShellState extends State<GuardianShell> {
     // Services
     _locationService = LocationService();
     _meshService = MeshService(
-      bleMesh: BleMeshService(),
       databases: _databases,
       databaseId: EnvConfig.appwriteDatabaseId,
       meshNodesCollectionId: EnvConfig.meshNodesCollection,
@@ -143,8 +141,7 @@ class _GuardianShellState extends State<GuardianShell> {
       currentRiderId: _currentRiderId,
     )..startListening();
 
-    // Start BLE mesh scanning
-    _meshService.startBleMesh(currentUserId: _currentRiderId);
+    _meshService.startMesh(currentUserId: _currentRiderId);
 
     _rideNavigationSub = _rideController.navigationEvents.listen((event) {
       if (!mounted) return;

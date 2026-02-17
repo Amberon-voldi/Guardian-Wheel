@@ -17,7 +17,7 @@ The system should:
 
 - Use device sensors (GPS, accelerometer, etc.) to detect crashes, harsh braking, and fatigue.
 - Work in low-signal / no-signal environments by prioritizing offline-first behavior.
-- Enable peer-to-peer Bluetooth / Wi‑Fi Direct alert sharing within a 1 km radius.
+- Enable peer-to-peer Wi‑Fi Direct alert sharing within a 1 km radius.
 - Auto-escalate emergencies to family or authorities with breadcrumb location tracking when
 	connectivity is available.
 - Crowdsource hazard data (potholes, bad lighting, accident hotspots) to improve safety for
@@ -27,7 +27,7 @@ The system should:
 
 - **Real-time hazard detection** using phone motion sensors and GPS.
 - **Fatigue monitoring** based on ride duration, movement patterns, and optional rider input.
-- **Offline-first mesh alerts** via Bluetooth / Wi‑Fi Direct within ~1 km radius.
+- **Offline-first mesh alerts** via Wi‑Fi Direct within ~1 km radius.
 - **SOS workflow** with auto-trigger on detected crash or manual trigger by rider.
 - **Auto-escalation** to trusted contacts / authorities once network becomes available.
 - **Breadcrumb location trail** for incident replay and assistance routing.
@@ -37,7 +37,7 @@ The system should:
 
 - **Framework:** Flutter (Dart)
 - **Targets:** Android (primary), iOS; support for web/desktop mainly for debugging and admin views.
-- **Connectivity:** Bluetooth / Wi‑Fi Direct–based mesh (via appropriate plugins), with cloud
+- **Connectivity:** Wi‑Fi Direct–based mesh (with cloud
 	sync when online.
 
 ## Project Structure (High Level)
@@ -63,7 +63,7 @@ The system should:
 - [ ] Baseline Flutter UI for rider home screen and SOS flow.
 - [ ] Sensor integration (GPS + accelerometer) and basic crash / harsh event detection.
 - [ ] Local-only SOS flow with manual trigger and incident logging.
-- [ ] Mesh networking prototype (Bluetooth / Wi‑Fi Direct) for peer-to-peer alerts.
+- [ ] Mesh networking prototype (Wi‑Fi Direct) for peer-to-peer alerts.
 - [ ] Auto-escalation pipeline to family / authorities with breadcrumb trail.
 - [ ] Hazard crowdsourcing UX and visualization for high-risk zones.
 

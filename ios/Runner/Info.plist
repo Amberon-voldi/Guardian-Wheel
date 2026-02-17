@@ -58,12 +58,6 @@
 		<key>NSLocationAlwaysUsageDescription</key>
 		<string>Guardian Wheel needs background location for crash detection and emergency alerts while riding.</string>
 
-		<!-- Bluetooth permissions (BLE mesh) -->
-		<key>NSBluetoothAlwaysUsageDescription</key>
-		<string>Guardian Wheel uses Bluetooth to communicate with nearby riders via mesh networking.</string>
-		<key>NSBluetoothPeripheralUsageDescription</key>
-		<string>Guardian Wheel uses Bluetooth to broadcast and receive emergency alerts to nearby riders.</string>
-
 		<!-- Motion sensors (crash detection) -->
 		<key>NSMotionUsageDescription</key>
 		<string>Guardian Wheel uses motion sensors to detect crashes and trigger emergency alerts.</string>
@@ -74,7 +68,6 @@
 			<string>location</string>
 			<string>fetch</string>
 			<string>processing</string>
-			<string>bluetooth-central</string>
 		</array>
 	</dict>
 </plist>

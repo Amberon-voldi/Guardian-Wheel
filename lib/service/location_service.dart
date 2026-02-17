@@ -68,11 +68,13 @@ class LocationService {
   bool _backgroundRunning = false;
 
   // Crash detection parameters (foreground fallback)
-  static const double _crashThresholdG = 4.0;
-  static const double _rotationCrashThreshold = 4.5;
-  static const Duration _crashMinImpactDuration = Duration(milliseconds: 500);
+  static const double _crashThresholdG = 2.1;
+  static const double _rotationCrashThreshold = 2.0;
+  static const Duration _crashMinImpactDuration = Duration(milliseconds: 20);
   static const double _crashFinalSpeedMaxKmh = 5.0;
-  static const double _crashMinRapidDropKmh = 15.0;
+  static const double _crashMinRapidDropKmh = 0.0;
+  static const double _crashMinPreImpactSpeedKmh = 0.0;
+  static const double _maxReliableGpsAccuracyMeters = 9999.0;
   static const Duration _crashSpeedDropWindow = Duration(seconds: 3);
   static const Duration _crashCooldown = Duration(seconds: 10);
   DateTime? _lastCrashTime;
@@ -348,13 +350,19 @@ class LocationService {
     final impactDuration = now.difference(impactStart);
     final speedKmh = (_lastPoint?.speed ?? 0) * 3.6;
     final speedDroppedRapidly = _hasRapidSpeedDrop(now, speedKmh);
+    final preImpactSpeedOk =
+        _maxSpeedInCrashWindow(now) >= _crashMinPreImpactSpeedKmh;
     final speedNearZero = speedKmh <= _crashFinalSpeedMaxKmh;
     final hasRotation = rotationRate >= _rotationCrashThreshold;
+    final gpsReliable =
+        (_lastPoint?.accuracy ?? 999) <= _maxReliableGpsAccuracyMeters;
 
     if (impactDuration >= _crashMinImpactDuration &&
+        preImpactSpeedOk &&
         speedNearZero &&
         speedDroppedRapidly &&
-        hasRotation) {
+        hasRotation &&
+        gpsReliable) {
       _handlePotentialCrash(_crashPeakImpactG, rotationRate: rotationRate);
     }
 
@@ -371,6 +379,9 @@ class LocationService {
   }
 
   bool _hasRapidSpeedDrop(DateTime now, double currentSpeedKmh) {
+    if (_crashMinRapidDropKmh <= 0) {
+      return true;
+    }
     if (_speedHistory.isEmpty) {
       return false;
     }
@@ -384,6 +395,22 @@ class LocationService {
       }
     }
     return (maxRecentSpeed - currentSpeedKmh) >= _crashMinRapidDropKmh;
+  }
+
+  double _maxSpeedInCrashWindow(DateTime now) {
+    if (_speedHistory.isEmpty) {
+      return 0;
+    }
+    var maxRecentSpeed = 0.0;
+    for (final sample in _speedHistory) {
+      if (now.difference(sample.timestamp) > _crashSpeedDropWindow) {
+        continue;
+      }
+      if (sample.speedKmh > maxRecentSpeed) {
+        maxRecentSpeed = sample.speedKmh;
+      }
+    }
+    return maxRecentSpeed;
   }
 
   void simulateCrash({String severity = 'high'}) {

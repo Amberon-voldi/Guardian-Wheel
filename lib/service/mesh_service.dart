@@ -7,7 +7,6 @@ import 'package:permission_handler/permission_handler.dart' as ph;
 
 import '../model/mesh_packet.dart';
 import 'app_event_bus.dart';
-import 'ble_mesh_service.dart';
 import 'local_database.dart';
 import 'wifi_direct_service.dart';
 
@@ -22,32 +21,28 @@ class MeshServiceException implements Exception {
 }
 
 /// Unified mesh networking service.
-/// Combines BLE P2P mesh with software-simulated relay, persists packets
+/// Uses Wi‑Fi Direct P2P bootstrap and relay simulation, persists packets
 /// locally for offline-first operation.
 class MeshService {
   MeshService({
     Connectivity? connectivity,
     this.eventBus,
-    BleMeshService? bleMesh,
     appwrite.Databases? databases,
     String? databaseId,
     String? meshNodesCollectionId,
     String? gatewayPacketsCollectionId,
     WifiDirectService? wifiDirectService,
     Future<bool> Function(MeshPacket packet)? gatewayUploader,
-  })
-      : _connectivity = connectivity ?? Connectivity(),
-        _bleMesh = bleMesh ?? BleMeshService(),
-        _databases = databases,
-        _databaseId = databaseId,
-        _meshNodesCollectionId = meshNodesCollectionId,
-        _gatewayPacketsCollectionId = gatewayPacketsCollectionId,
-        _gatewayUploader = gatewayUploader,
-        _wifiDirectService = wifiDirectService ?? WifiDirectService();
+  }) : _connectivity = connectivity ?? Connectivity(),
+       _databases = databases,
+       _databaseId = databaseId,
+       _meshNodesCollectionId = meshNodesCollectionId,
+       _gatewayPacketsCollectionId = gatewayPacketsCollectionId,
+       _gatewayUploader = gatewayUploader,
+       _wifiDirectService = wifiDirectService ?? WifiDirectService();
 
   final Connectivity _connectivity;
   final AppEventBus? eventBus;
-  final BleMeshService _bleMesh;
   final appwrite.Databases? _databases;
   final String? _databaseId;
   final String? _meshNodesCollectionId;
@@ -61,75 +56,84 @@ class MeshService {
       StreamController<MeshPacketState>.broadcast();
   final StreamController<int> _peerCountController =
       StreamController<int>.broadcast();
+  final StreamController<WifiDirectBootstrapEvent> _wifiStateController =
+      StreamController<WifiDirectBootstrapEvent>.broadcast();
   final Set<String> _seenPacketIds = <String>{};
 
-  StreamSubscription<MeshPacketState>? _bleSub;
-  StreamSubscription<BleP2PEvent>? _blePeerSub;
   StreamSubscription<List<WifiDirectPeer>>? _wifiPeerSub;
+  StreamSubscription<WifiDirectBootstrapEvent>? _wifiStateSub;
+  Timer? _wifiRestartDebounce;
   String? _currentUserId;
+  WifiDirectBootstrapState _lastWifiState = WifiDirectBootstrapState.idle;
 
   Stream<MeshPacketState> get packetStates => _packetStateController.stream;
-    Stream<int> get peerCountStream => _peerCountController.stream;
+  Stream<int> get peerCountStream => _peerCountController.stream;
+  Stream<WifiDirectBootstrapEvent> get wifiStateEvents =>
+      _wifiStateController.stream;
+  WifiDirectBootstrapState get wifiState => _lastWifiState;
+  bool get isWifiDirectActive =>
+      _lastWifiState == WifiDirectBootstrapState.discovering ||
+      _lastWifiState == WifiDirectBootstrapState.connecting ||
+      _lastWifiState == WifiDirectBootstrapState.connected ||
+      _lastWifiState == WifiDirectBootstrapState.go;
   Set<String> get seenPacketIds => Set<String>.unmodifiable(_seenPacketIds);
-  BleMeshService get bleMesh => _bleMesh;
-  int get peerCount => _bleMesh.peerCount + _wifiDirectPeers.length;
+  int get peerCount => _wifiDirectPeers.length;
 
-  /// Start BLE scanning and bridge BLE packets into the unified stream.
-  Future<void> startBleMesh({required String currentUserId}) async {
+  Future<void> startMesh({required String currentUserId}) async {
     _currentUserId = currentUserId;
     await _ensureNearbyPermissions();
-    await _bleMesh.startScanning();
-    _bleSub ??= _bleMesh.packetStates.listen((state) {
-      final packet = state.packet;
-      final fromPeer = packet.lastPeer ?? 'ble-peer';
 
-      if (state.status == MeshPacketStatus.duplicateDropped ||
-          state.status == MeshPacketStatus.expired) {
-        return;
-      }
+    _wifiPeerSub ??= _wifiDirectService.peersStream.listen(
+      (peers) {
+        final filteredPeers = peers
+            .where((peer) {
+              final isAppPeer = peer.isGuardianApp || peer.appMarker == '1';
+              if (!isAppPeer) return false;
+              if (peer.userId.isEmpty) return false;
+              return peer.userId != _currentUserId;
+            })
+            .toList(growable: false);
 
-      // Ignore our own packet lifecycle echoes from BLE simulator.
-      if (packet.origin == _currentUserId &&
-          (state.status == MeshPacketStatus.created ||
-              state.status == MeshPacketStatus.forwarding ||
-              state.status == MeshPacketStatus.forwarded)) {
-        return;
-      }
+        _wifiDirectPeers
+          ..clear()
+          ..addEntries(
+            filteredPeers.map((peer) => MapEntry(peer.address, peer)),
+          );
 
-      final normalizedIncoming = packet.copyWith(
-        hop: packet.hop > 0 ? packet.hop - 1 : 0,
-        status: MeshPacketStatus.created,
-      );
+        if (!_peerCountController.isClosed) {
+          _peerCountController.add(peerCount);
+        }
+      },
+      onError: (_) {
+        _emitWifiEvent(
+          const WifiDirectBootstrapEvent(
+            state: WifiDirectBootstrapState.failed,
+            message: 'Wi‑Fi Direct peer stream failed.',
+          ),
+        );
+        _scheduleWifiRestart();
+      },
+    );
 
-      unawaited(receivePacket(packet: normalizedIncoming, fromPeer: fromPeer));
-    });
-
-    _blePeerSub ??= _bleMesh.peerEvents.listen((_) {
-      if (!_peerCountController.isClosed) {
-        _peerCountController.add(peerCount);
-      }
-    });
-
-    _wifiPeerSub ??= _wifiDirectService.peersStream.listen((peers) {
-      final filteredPeers = peers.where((peer) {
-        if (peer.userId.isEmpty) return false;
-        return peer.userId != _currentUserId;
-      }).toList(growable: false);
-
-      _wifiDirectPeers
-        ..clear()
-        ..addEntries(filteredPeers.map((peer) => MapEntry(peer.address, peer)));
-
-      if (!_peerCountController.isClosed) {
-        _peerCountController.add(peerCount);
-      }
-
-      for (final peer in filteredPeers) {
-        _wifiDirectService.connect(peer.address);
-      }
-    }, onError: (_) {
-      // Unsupported platform/plugin path; BLE mesh continues.
-    });
+    _wifiStateSub ??= _wifiDirectService.stateStream.listen(
+      (event) {
+        _emitWifiEvent(event);
+        final callback = event.callback;
+        if (callback == 'onDisconnected' ||
+            event.state == WifiDirectBootstrapState.failed) {
+          _scheduleWifiRestart();
+        }
+      },
+      onError: (_) {
+        _emitWifiEvent(
+          const WifiDirectBootstrapEvent(
+            state: WifiDirectBootstrapState.failed,
+            message: 'Wi‑Fi Direct state stream failed.',
+          ),
+        );
+        _scheduleWifiRestart();
+      },
+    );
 
     await _wifiDirectService.startDiscovery(userId: currentUserId);
 
@@ -138,16 +142,30 @@ class MeshService {
     }
   }
 
-  Future<void> stopBleMesh() async {
-    await _bleSub?.cancel();
-    _bleSub = null;
-    await _blePeerSub?.cancel();
-    _blePeerSub = null;
+  Future<void> stopMesh() async {
+    _wifiRestartDebounce?.cancel();
+    _wifiRestartDebounce = null;
     await _wifiPeerSub?.cancel();
     _wifiPeerSub = null;
+    await _wifiStateSub?.cancel();
+    _wifiStateSub = null;
     _wifiDirectPeers.clear();
     await _wifiDirectService.stopDiscovery();
-    await _bleMesh.stopScanning();
+    _emitWifiEvent(
+      const WifiDirectBootstrapEvent(
+        state: WifiDirectBootstrapState.idle,
+        message: 'Wi‑Fi Direct stopped.',
+      ),
+    );
+  }
+
+  Future<void> restartMesh() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) {
+      return;
+    }
+    await stopMesh();
+    await startMesh(currentUserId: userId);
   }
 
   Future<void> updateSelfNode({
@@ -159,7 +177,9 @@ class MeshService {
     final databases = _databases;
     final databaseId = _databaseId;
     final meshNodesCollectionId = _meshNodesCollectionId;
-    if (databases == null || databaseId == null || meshNodesCollectionId == null) {
+    if (databases == null ||
+        databaseId == null ||
+        meshNodesCollectionId == null) {
       return;
     }
 
@@ -197,7 +217,6 @@ class MeshService {
     required double lat,
     required double lng,
     int ttl = 5,
-    List<String> mockPeers = const ['peer-A', 'peer-B', 'peer-C'],
     Duration relayDelay = const Duration(milliseconds: 450),
   }) async {
     try {
@@ -226,13 +245,15 @@ class MeshService {
       final rebroadcasted = await _rebroadcastPacket(
         packet: packet,
         fromPeer: null,
-        fallbackPeers: mockPeers,
         relayDelay: relayDelay,
       );
       return rebroadcasted;
     } catch (error) {
       if (error is MeshServiceException) rethrow;
-      throw MeshServiceException('Failed to generate alert packet.', cause: error);
+      throw MeshServiceException(
+        'Failed to generate alert packet.',
+        cause: error,
+      );
     }
   }
 
@@ -245,7 +266,11 @@ class MeshService {
         status: MeshPacketStatus.duplicateDropped,
         lastPeer: fromPeer,
       );
-      _emit(dropped, MeshPacketStatus.duplicateDropped, 'Duplicate from $fromPeer.');
+      _emit(
+        dropped,
+        MeshPacketStatus.duplicateDropped,
+        'Duplicate from $fromPeer.',
+      );
       return dropped;
     }
 
@@ -281,15 +306,12 @@ class MeshService {
   Future<MeshPacket> _rebroadcastPacket({
     required MeshPacket packet,
     required String? fromPeer,
-    List<String> fallbackPeers = const ['peer-A', 'peer-B', 'peer-C'],
     Duration relayDelay = const Duration(milliseconds: 450),
   }) async {
     final candidatePeers = <String>{
-      ..._bleMesh.peers.keys,
       ..._wifiDirectPeers.values
           .where((peer) => peer.userId.isNotEmpty)
           .map((peer) => peer.userId),
-      if (_bleMesh.peerCount == 0 && _wifiDirectPeers.isEmpty) ...fallbackPeers,
     };
 
     if (fromPeer != null && fromPeer.isNotEmpty) {
@@ -301,7 +323,11 @@ class MeshService {
 
     if (candidatePeers.isEmpty) {
       final pending = packet.copyWith(status: MeshPacketStatus.pending);
-      _emit(pending, MeshPacketStatus.pending, 'No peers available; packet pending.');
+      _emit(
+        pending,
+        MeshPacketStatus.pending,
+        'No peers available; packet pending.',
+      );
       _persistPacket(pending);
       return pending;
     }
@@ -333,7 +359,10 @@ class MeshService {
     );
     _emit(delivered, MeshPacketStatus.delivered, 'Gateway delivered packet.');
     _persistPacket(delivered);
-    eventBus?.publishMeshDelivery(delivered, message: 'Packet delivered by gateway.');
+    eventBus?.publishMeshDelivery(
+      delivered,
+      message: 'Packet delivered by gateway.',
+    );
     return delivered;
   }
 
@@ -394,34 +423,43 @@ class MeshService {
   void _emit(MeshPacket packet, MeshPacketStatus status, String message) {
     if (_packetStateController.isClosed) return;
     _packetStateController.add(
-      MeshPacketState(packet: packet, timestamp: DateTime.now().toUtc(), status: status, message: message),
+      MeshPacketState(
+        packet: packet,
+        timestamp: DateTime.now().toUtc(),
+        status: status,
+        message: message,
+      ),
     );
   }
 
   void _persistPacket(MeshPacket packet) {
-    unawaited(_localDb.insertMeshPacket({
-      'id': packet.id,
-      'origin': packet.origin,
-      'lat': packet.lat,
-      'lng': packet.lng,
-      'hop': packet.hop,
-      'ttl': packet.ttl,
-      'status': packet.status.name,
-      'last_peer': packet.lastPeer,
-      'delivered_at': packet.deliveredAt?.toIso8601String(),
-      'created_at': packet.createdAt.toIso8601String(),
-      'synced': 0,
-    }));
+    unawaited(
+      _localDb.insertMeshPacket({
+        'id': packet.id,
+        'origin': packet.origin,
+        'lat': packet.lat,
+        'lng': packet.lng,
+        'hop': packet.hop,
+        'ttl': packet.ttl,
+        'status': packet.status.name,
+        'last_peer': packet.lastPeer,
+        'delivered_at': packet.deliveredAt?.toIso8601String(),
+        'created_at': packet.createdAt.toIso8601String(),
+        'synced': 0,
+      }),
+    );
   }
 
   Future<void> dispose() async {
-    await _blePeerSub?.cancel();
-    await stopBleMesh();
+    await stopMesh();
     if (!_peerCountController.isClosed) {
       await _peerCountController.close();
     }
     if (!_packetStateController.isClosed) {
       await _packetStateController.close();
+    }
+    if (!_wifiStateController.isClosed) {
+      await _wifiStateController.close();
     }
   }
 
@@ -431,8 +469,26 @@ class MeshService {
       ph.Permission.locationWhenInUse,
       ph.Permission.location,
       ph.Permission.nearbyWifiDevices,
-      ph.Permission.bluetoothScan,
-      ph.Permission.bluetoothConnect,
     ].request();
+  }
+
+  void _emitWifiEvent(WifiDirectBootstrapEvent event) {
+    if (event.state != null) {
+      _lastWifiState = event.state!;
+    }
+    if (!_wifiStateController.isClosed) {
+      _wifiStateController.add(event);
+    }
+  }
+
+  void _scheduleWifiRestart() {
+    final userId = _currentUserId;
+    if (userId == null || userId.isEmpty) {
+      return;
+    }
+    _wifiRestartDebounce?.cancel();
+    _wifiRestartDebounce = Timer(const Duration(seconds: 2), () async {
+      await restartMesh();
+    });
   }
 }

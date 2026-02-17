@@ -88,17 +88,20 @@ void _onStart(ServiceInstance service) async {
   double lastLat = 0;
   double lastLng = 0;
   double lastSpeed = 0;
+  double lastAccuracy = 999;
   double lastGyroMagnitude = 0;
   DateTime? lastCrashTime;
   DateTime? crashImpactStart;
   double crashPeakImpactG = 0;
   final List<_SpeedSample> speedHistory = [];
 
-  const double crashThresholdG = 4.0;
-  const double rotationCrashThreshold = 4.5;
-  const crashMinImpactDuration = Duration(milliseconds: 500);
+  const double crashThresholdG = 2.1;
+  const double rotationCrashThreshold = 2.0;
+  const crashMinImpactDuration = Duration(milliseconds: 20);
   const double crashFinalSpeedMaxKmh = 5.0;
-  const double crashMinRapidDropKmh = 15.0;
+  const double crashMinRapidDropKmh = 0.0;
+  const double crashMinPreImpactSpeedKmh = 0.0;
+  const double maxReliableGpsAccuracyMeters = 9999.0;
   const crashSpeedDropWindow = Duration(seconds: 3);
   const crashCooldown = Duration(seconds: 10);
 
@@ -107,6 +110,7 @@ void _onStart(ServiceInstance service) async {
     lastLat = pos.latitude;
     lastLng = pos.longitude;
     lastSpeed = pos.speed;
+    lastAccuracy = pos.accuracy;
 
     final speedKmh = pos.speed * 3.6;
     if (speedKmh > 0) {
@@ -225,13 +229,17 @@ void _onStart(ServiceInstance service) async {
           }
           final rapidDrop =
               (maxRecentSpeed - currentSpeedKmh) >= crashMinRapidDropKmh;
+          final preImpactSpeedOk = maxRecentSpeed >= crashMinPreImpactSpeedKmh;
           final speedNearZero = currentSpeedKmh <= crashFinalSpeedMaxKmh;
           final hasRotation = lastGyroMagnitude >= rotationCrashThreshold;
+          final gpsReliable = lastAccuracy <= maxReliableGpsAccuracyMeters;
 
           if (impactDuration >= crashMinImpactDuration &&
+              preImpactSpeedOk &&
               rapidDrop &&
               speedNearZero &&
-              hasRotation) {
+              hasRotation &&
+              gpsReliable) {
             handleCrash(crashPeakImpactG, rotationRate: lastGyroMagnitude);
           }
 
